@@ -106,7 +106,7 @@ void handleMenuInput() {
 void handlePlaceholderInput() {
     auto& keyboard = M5Cardputer.Keyboard;
 
-    if (keyboard.isKeyPressed(KEY_ESC)) {
+    if (keyboard.isKeyPressed('`')) {
         returnToMenu();
     }
 }

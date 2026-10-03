@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <M5Cardputer.h>
 #include <Wire.h>
+#include <SPI.h>
+#include <SD.h>
 #include <TinyGPSPlus.h>
 #include <M5UnitUnified.h>
 #include <M5UnitUnifiedENV.h>
@@ -33,6 +35,33 @@ float envPressurePa = NAN;
 constexpr int GPS_RX_PIN = 15;
 constexpr int GPS_TX_PIN = 13;
 constexpr uint32_t GPS_BAUD = 115200;
+
+constexpr int SD_CS_PIN = 12;
+constexpr int SD_SCK_PIN = 40;
+constexpr int SD_MOSI_PIN = 14;
+constexpr int SD_MISO_PIN = 39;
+constexpr uint32_t SD_SPI_HZ = 25000000U;
+
+constexpr uint32_t IMU_LOG_HZ = 150U;
+constexpr uint32_t IMU_LOG_INTERVAL_US = 1000000UL / IMU_LOG_HZ;
+constexpr size_t IMU_LOG_SAMPLES = 150;
+constexpr char IMU_LOG_PATH[] = "/imu_raw.csv";
+
+struct IMUSample {
+    uint32_t timestampMs;
+    float accX;
+    float accY;
+    float accZ;
+    float gyroX;
+    float gyroY;
+    float gyroZ;
+};
+
+IMUSample imuLogBuffer[IMU_LOG_SAMPLES];
+size_t imuLogCount = 0;
+uint32_t nextImuSampleUs = 0;
+bool sdReady = false;
+bool imuLogReady = false;
 
 HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
@@ -134,28 +163,108 @@ void drawIMUStatus() {
 
     display.fillScreen(BLACK);
     display.setTextColor(WHITE, BLACK);
-    display.setTextSize(2);
-    display.setCursor(8, 4);
-    display.println("IMU Status");
     display.setTextSize(1);
-    display.setCursor(8, 29);
+    display.setCursor(8, 1);
+    display.println("IMU Raw (A=G, G=dps)");
 
-    display.println("Acceleration (G)");
-    display.printf("X : % .3f\n", accX);
-    display.printf("Y : % .3f\n", accY);
-    display.printf("Z : % .3f\n", accZ);
-    display.println();
-    display.println("Gyro (dps)");
-    display.printf("X : % .3f\n", gyroX);
-    display.printf("Y : % .3f\n", gyroY);
-    display.printf("Z : % .3f\n", gyroZ);
+    display.setTextSize(2);
+    display.setCursor(8, 14);
+    display.printf("A X:% .3f\n", accX);
+    display.printf("A Y:% .3f\n", accY);
+    display.printf("A Z:% .3f\n", accZ);
+    display.printf("G X:% .3f\n", gyroX);
+    display.printf("G Y:% .3f\n", gyroY);
+    display.printf("G Z:% .3f\n", gyroZ);
 
-    display.setCursor(8, display.height() - 14);
+    display.setTextSize(1);
+    display.setCursor(8, 120);
     display.print("Back: ");
     display.println(static_cast<char>(96));
 }
 
+void writeImuLogBuffer() {
+    if (!sdReady || imuLogCount == 0) return;
+
+    File file = SD.open(IMU_LOG_PATH, FILE_APPEND);
+    if (!file) {
+        imuLogReady = false;
+        return;
+    }
+
+    char line[128];
+    for (size_t i = 0; i < imuLogCount; ++i) {
+        const IMUSample& s = imuLogBuffer[i];
+        const int length = snprintf(
+            line,
+            sizeof(line),
+            "%lu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            static_cast<unsigned long>(s.timestampMs),
+            s.accX, s.accY, s.accZ,
+            s.gyroX, s.gyroY, s.gyroZ
+        );
+
+        if (length > 0) {
+            file.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(length));
+        }
+    }
+
+    file.flush();
+    file.close();
+    imuLogCount = 0;
+}
+
+void sampleIMUForLog() {
+    if (!sdReady) return;
+
+    const uint32_t nowUs = micros();
+    if (static_cast<int32_t>(nowUs - nextImuSampleUs) < 0) return;
+
+    nextImuSampleUs += IMU_LOG_INTERVAL_US;
+
+    float accX = 0.0f, accY = 0.0f, accZ = 0.0f;
+    float gyroX = 0.0f, gyroY = 0.0f, gyroZ = 0.0f;
+    M5.Imu.getAccelData(&accX, &accY, &accZ);
+    M5.Imu.getGyroData(&gyroX, &gyroY, &gyroZ);
+
+    if (imuLogCount < IMU_LOG_SAMPLES) {
+        imuLogBuffer[imuLogCount++] = {
+            millis(),
+            accX, accY, accZ,
+            gyroX, gyroY, gyroZ
+        };
+    }
+
+    if (imuLogCount >= IMU_LOG_SAMPLES) {
+        writeImuLogBuffer();
+    }
+}
+
+void setupIMULogging() {
+    SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+    sdReady = SD.begin(SD_CS_PIN, SPI, SD_SPI_HZ);
+
+    if (!sdReady) {
+        imuLogReady = false;
+        return;
+    }
+
+    if (!SD.exists(IMU_LOG_PATH)) {
+        File file = SD.open(IMU_LOG_PATH, FILE_WRITE);
+        if (file) {
+            file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z");
+            file.close();
+            imuLogReady = true;
+        }
+    } else {
+        imuLogReady = true;
+    }
+
+    nextImuSampleUs = micros();
+}
+
 void updateIMU() {
+    sampleIMUForLog();
+
     if (currentScreen == Screen::IMUStatus) {
         drawIMUStatus();
     }
@@ -289,6 +398,7 @@ void setup() {
     M5Cardputer.Display.setRotation(1);
     setupEnvironment();
     setupGPS();
+    setupIMULogging();
     drawMenu();
 }
 

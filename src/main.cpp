@@ -102,7 +102,7 @@ void drawEnvironment() {
     } else {
         display.printf("Temperature : %.2f C\n", envTemperature);
         display.printf("Humidity    : %.2f %%\n", envHumidity);
-        display.printf("Pressure    : %.0f Pa\n", envPressurePa);
+        display.printf("Pressure    : %.0f Pa\n", envPressurePa);\n        display.printf("              %.2f hPa\n", envPressurePa / 100.0f);
     }
     display.setCursor(8, display.height() - 14);
     display.println("[`] Back");

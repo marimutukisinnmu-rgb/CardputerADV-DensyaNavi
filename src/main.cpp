@@ -6,6 +6,7 @@
 #include <TinyGPSPlus.h>
 #include <M5UnitUnified.h>
 #include <M5UnitUnifiedENV.h>
+#include <esp_system.h>
 
 enum class Screen { Menu, Placeholder, GPSStatus, IMUStatus, Environment };
 
@@ -45,7 +46,7 @@ constexpr uint32_t SD_SPI_HZ = 25000000U;
 constexpr uint32_t IMU_LOG_HZ = 150U;
 constexpr uint32_t IMU_LOG_INTERVAL_US = 1000000UL / IMU_LOG_HZ;
 constexpr size_t IMU_LOG_SAMPLES = 150;
-constexpr char IMU_LOG_PATH[] = "/imu_raw.csv";
+char imuLogPath[32] = "/imu-0.csv";
 
 struct IMUSample {
     uint32_t timestampMs;
@@ -185,7 +186,7 @@ void drawIMUStatus() {
 void writeImuLogBuffer() {
     if (!sdReady || imuLogCount == 0) return;
 
-    File file = SD.open(IMU_LOG_PATH, FILE_APPEND);
+    File file = SD.open(imuLogPath, FILE_APPEND);
     if (!file) {
         imuLogReady = false;
         return;
@@ -248,15 +249,23 @@ void setupIMULogging() {
         return;
     }
 
-    if (!SD.exists(IMU_LOG_PATH)) {
-        File file = SD.open(IMU_LOG_PATH, FILE_WRITE);
-        if (file) {
-            file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z");
-            file.close();
-            imuLogReady = true;
-        }
-    } else {
+    // 毎回の起動で新しいランダム番号のログファイルを作る。
+    // 万一同名が存在した場合は別の番号を引き直す。
+    uint32_t randomNumber = 0;
+    do {
+        randomNumber = esp_random();
+        snprintf(imuLogPath, sizeof(imuLogPath), "/imu-%lu.csv",
+                 static_cast<unsigned long>(randomNumber));
+    } while (SD.exists(imuLogPath));
+
+    File file = SD.open(imuLogPath, FILE_WRITE);
+    if (file) {
+        file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z");
+        file.close();
         imuLogReady = true;
+    } else {
+        imuLogReady = false;
+        return;
     }
 
     nextImuSampleUs = micros();

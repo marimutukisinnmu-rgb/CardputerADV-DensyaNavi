@@ -5,7 +5,7 @@
 #include <M5UnitUnified.h>
 #include <M5UnitUnifiedENV.h>
 
-enum class Screen { Menu, Placeholder, GPSStatus, Environment };
+enum class Screen { Menu, Placeholder, GPSStatus, IMUStatus, Environment };
 
 struct MenuItem { const char* label; };
 
@@ -13,6 +13,7 @@ constexpr MenuItem MENU_ITEMS[] = {
     {"Start Navi"},
     {"Station / Platform"},
     {"GPS Status"},
+    {"IMU Status"},
     {"SD Card"},
     {"Settings"},
     {"Environment"},
@@ -123,6 +124,43 @@ void drawGPSStatus() {
     display.println("Back: `");
 }
 
+void drawIMUStatus() {
+    auto& display = M5Cardputer.Display;
+    float accX = 0.0f, accY = 0.0f, accZ = 0.0f;
+    float gyroX = 0.0f, gyroY = 0.0f, gyroZ = 0.0f;
+
+    M5.Imu.getAccelData(&accX, &accY, &accZ);
+    M5.Imu.getGyroData(&gyroX, &gyroY, &gyroZ);
+
+    display.fillScreen(BLACK);
+    display.setTextColor(WHITE, BLACK);
+    display.setTextSize(2);
+    display.setCursor(8, 4);
+    display.println("IMU Status");
+    display.setTextSize(1);
+    display.setCursor(8, 29);
+
+    display.println("Acceleration (G)");
+    display.printf("X : % .3f\n", accX);
+    display.printf("Y : % .3f\n", accY);
+    display.printf("Z : % .3f\n", accZ);
+    display.println();
+    display.println("Gyro (dps)");
+    display.printf("X : % .3f\n", gyroX);
+    display.printf("Y : % .3f\n", gyroY);
+    display.printf("Z : % .3f\n", gyroZ);
+
+    display.setCursor(8, display.height() - 14);
+    display.print("Back: ");
+    display.println(static_cast<char>(96));
+}
+
+void updateIMU() {
+    if (currentScreen == Screen::IMUStatus) {
+        drawIMUStatus();
+    }
+}
+
 void drawEnvironment() {
     auto& display = M5Cardputer.Display;
     display.fillScreen(BLACK);
@@ -152,6 +190,9 @@ void openSelectedItem() {
     if (openedItem == 2) {
         currentScreen = Screen::GPSStatus;
         drawGPSStatus();
+    } else if (openedItem == 3) {
+        currentScreen = Screen::IMUStatus;
+        drawIMUStatus();
     } else if (openedItem == MENU_COUNT - 1) {
         currentScreen = Screen::Environment;
         drawEnvironment();
@@ -254,6 +295,7 @@ void setup() {
 void loop() {
     M5Cardputer.update();
     updateGPS();
+    updateIMU();
     updateEnvironment();
 
     if (M5Cardputer.Keyboard.isChange() &&

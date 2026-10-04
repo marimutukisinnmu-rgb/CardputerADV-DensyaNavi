@@ -56,6 +56,13 @@ struct IMUSample {
     float gyroX;
     float gyroY;
     float gyroZ;
+    bool gpsValid;
+    double gpsLat;
+    double gpsLon;
+    double gpsAltitudeM;
+    double gpsSpeedKmph;
+    uint32_t gpsSatellites;
+    double gpsHdop;
 };
 
 IMUSample imuLogBuffer[IMU_LOG_SAMPLES];
@@ -198,10 +205,15 @@ void writeImuLogBuffer() {
         const int length = snprintf(
             line,
             sizeof(line),
-            "%lu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            "%lu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.8f,%.8f,%.2f,%.2f,%lu,%.2f\n",
             static_cast<unsigned long>(s.timestampMs),
             s.accX, s.accY, s.accZ,
-            s.gyroX, s.gyroY, s.gyroZ
+            s.gyroX, s.gyroY, s.gyroZ,
+            s.gpsValid ? 1 : 0,
+            s.gpsLat, s.gpsLon,
+            s.gpsAltitudeM, s.gpsSpeedKmph,
+            static_cast<unsigned long>(s.gpsSatellites),
+            s.gpsHdop
         );
 
         if (length > 0) {
@@ -228,10 +240,22 @@ void sampleIMUForLog() {
     M5.Imu.getGyroData(&gyroX, &gyroY, &gyroZ);
 
     if (imuLogCount < IMU_LOG_SAMPLES) {
+        const bool gpsValid = gps.location.isValid();
+        const double gpsLat = gpsValid ? gps.location.lat() : NAN;
+        const double gpsLon = gpsValid ? gps.location.lng() : NAN;
+        const double gpsAltitudeM = gps.altitude.isValid() ? gps.altitude.meters() : NAN;
+        const double gpsSpeedKmph = gps.speed.isValid() ? gps.speed.kmph() : NAN;
+        const uint32_t gpsSatellites = gps.satellites.isValid() ? gps.satellites.value() : 0;
+        const double gpsHdop = gps.hdop.isValid() ? gps.hdop.hdop() : NAN;
+
         imuLogBuffer[imuLogCount++] = {
             millis(),
             accX, accY, accZ,
-            gyroX, gyroY, gyroZ
+            gyroX, gyroY, gyroZ,
+            gpsValid,
+            gpsLat, gpsLon,
+            gpsAltitudeM, gpsSpeedKmph,
+            gpsSatellites, gpsHdop
         };
     }
 
@@ -260,7 +284,7 @@ void setupIMULogging() {
 
     File file = SD.open(imuLogPath, FILE_WRITE);
     if (file) {
-        file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z");
+        file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
         file.close();
         imuLogReady = true;
     } else {

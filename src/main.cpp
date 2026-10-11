@@ -8,7 +8,7 @@
 #include <M5UnitUnifiedENV.h>
 #include <esp_system.h>
 
-enum class Screen { Menu, Placeholder, GPSStatus, IMUStatus, Environment };
+enum class Screen { Menu, Placeholder, GPSStatus, IMUStatus, Environment, Filename };
 
 struct MenuItem { const char* label; };
 
@@ -46,8 +46,14 @@ constexpr uint32_t SD_SPI_HZ = 25000000U;
 constexpr uint32_t IMU_LOG_HZ = 40U;
 constexpr uint32_t IMU_LOG_INTERVAL_US = 1000000UL / IMU_LOG_HZ;
 constexpr size_t IMU_LOG_SAMPLES = 40;
-char imuLogPath[32] = "/imu-00000.csv";
+char imuLogPath[64] = "/imu-pending.csv";
+char pendingLogPath[64] = "/imu-pending.csv";
+char filenameInput[48] = "";
+size_t filenameLength = 0;
 uint32_t nextLogNumber = 1;
+constexpr int BTN_G0_PIN = 0;
+bool lastG0State = HIGH;
+uint32_t lastG0ChangeMs = 0;
 
 struct IMUSample {
     uint32_t timestampMs;
@@ -188,14 +194,14 @@ void drawIMUStatus() {
 
     display.setTextSize(1);
     display.setCursor(8, 110);
-    display.printf("REC: %s  K: start/stop", recording ? "ON" : "OFF");
+    display.printf("REC: %s  G0/K toggle", recording ? "ON" : "OFF");
     display.setCursor(8, 123);
     display.print("Back: ");
     display.println(static_cast<char>(96));
 }
 
 void writeImuLogBuffer() {
-    if (!sdReady || !recording || imuLogCount == 0) return;
+    if (!sdReady || imuLogCount == 0) return;
 
     File file = SD.open(imuLogPath, FILE_APPEND);
     if (!file) {
@@ -287,27 +293,18 @@ void setupIMULogging() {
         nextLogNumber = 1;
     }
 
-    // 記録ファイルはKキーで開始した時点で作成する。
+    // 記録開始時は仮ファイルを使い、停止後に名前を確定する。
     imuLogReady = true;
 }
 
 bool startRecording() {
     if (!sdReady || !imuLogReady || recording) return false;
 
-    // 既存ファイルがある場合も上書きせず、空いている連番を探す。
-    while (nextLogNumber != 0) {
-        snprintf(imuLogPath, sizeof(imuLogPath), "/imu-%05lu.csv",
-                 static_cast<unsigned long>(nextLogNumber));
-        if (!SD.exists(imuLogPath)) break;
-        ++nextLogNumber;
-    }
-    if (nextLogNumber == 0) return false;
-
-    SD.remove("/imu_counter.txt");
-    File counterOut = SD.open("/imu_counter.txt", FILE_WRITE);
-    if (counterOut) {
-        counterOut.println(nextLogNumber);
-        counterOut.close();
+    strlcpy(imuLogPath, "/imu-pending.csv", sizeof(imuLogPath));
+    // 前回の仮ファイルが残っていても、意図せず上書きしない。
+    if (SD.exists(imuLogPath)) {
+        Serial.println("[REC] Pending file already exists; rename or remove it first.");
+        return false;
     }
 
     File file = SD.open(imuLogPath, FILE_WRITE);
@@ -315,12 +312,72 @@ bool startRecording() {
     file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
     file.close();
 
-    ++nextLogNumber;
     imuLogCount = 0;
     recording = true;
     nextImuSampleUs = micros();
-    Serial.printf("[REC] Started: %s at %u Hz\n", imuLogPath, IMU_LOG_HZ);
+    Serial.printf("[REC] Started: %s at %u Hz\\n", imuLogPath, IMU_LOG_HZ);
     return true;
+}
+
+void showFilenameInput() {
+    filenameLength = 0;
+    filenameInput[0] = '\\0';
+    currentScreen = Screen::Filename;
+    auto& display = M5Cardputer.Display;
+    display.fillScreen(BLACK);
+    display.setTextColor(WHITE, BLACK);
+    display.setTextSize(2);
+    display.setCursor(8, 8);
+    display.println("Save recording");
+    display.setTextSize(1);
+    display.setCursor(8, 38);
+    display.println("Enter name for imu-XXXX.csv");
+    display.setCursor(8, 58);
+    display.print("imu-");
+    display.print(filenameInput);
+    display.print(".csv");
+    display.setCursor(8, 92);
+    display.println("Type name; DEL to erase");
+    display.setCursor(8, 108);
+    display.println("Enter: save");
+}
+
+void redrawFilenameInput() {
+    auto& display = M5Cardputer.Display;
+    display.fillRect(0, 54, display.width(), 24, BLACK);
+    display.setCursor(8, 58);
+    display.setTextColor(WHITE, BLACK);
+    display.print("imu-");
+    display.print(filenameInput);
+    display.print(".csv");
+}
+
+void finalizeRecordingName() {
+    if (filenameLength == 0) return;
+    // Permit letters, digits, dash and underscore only; this prevents paths.
+    for (size_t i = 0; i < filenameLength; ++i) {
+        const char ch = filenameInput[i];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
+            Serial.println("[REC] Invalid filename character.");
+            return;
+        }
+    }
+    char finalPath[64];
+    snprintf(finalPath, sizeof(finalPath), "/imu-%s.csv", filenameInput);
+    if (SD.exists(finalPath)) {
+        auto& display = M5Cardputer.Display;
+        display.setCursor(8, 124);
+        display.print("Name exists! Choose another");
+        return;
+    }
+    if (!SD.rename(imuLogPath, finalPath)) {
+        Serial.println("[REC] Rename failed; pending file retained.");
+        return;
+    }
+    strlcpy(imuLogPath, finalPath, sizeof(imuLogPath));
+    Serial.printf("[REC] Saved as: %s\\n", imuLogPath);
+    returnToMenu();
 }
 
 void stopRecording() {
@@ -328,6 +385,7 @@ void stopRecording() {
     writeImuLogBuffer();
     recording = false;
     Serial.printf("[REC] Stopped: %s\\n", imuLogPath);
+    showFilenameInput();
 }
 
 void updateIMU() {
@@ -467,6 +525,8 @@ void setup() {
     setupEnvironment();
     setupGPS();
     setupIMULogging();
+    pinMode(BTN_G0_PIN, INPUT_PULLUP);
+    lastG0State = digitalRead(BTN_G0_PIN);
     drawMenu();
 }
 
@@ -476,14 +536,48 @@ void loop() {
     updateIMU();
     updateEnvironment();
 
-    if (M5Cardputer.Keyboard.isChange() &&
-        M5Cardputer.Keyboard.isPressed()) {
-        if (M5Cardputer.Keyboard.isKeyPressed('k') || M5Cardputer.Keyboard.isKeyPressed('K')) {
+    // BtnG0 is active-low. Trigger only on a debounced press edge.
+    const bool g0State = digitalRead(BTN_G0_PIN);
+    const uint32_t nowMs = millis();
+    if (g0State != lastG0State && nowMs - lastG0ChangeMs >= 30U) {
+        lastG0ChangeMs = nowMs;
+        lastG0State = g0State;
+        if (g0State == LOW) {
             if (recording) stopRecording();
-            else startRecording();
+            else if (currentScreen != Screen::Filename) startRecording();
             if (currentScreen == Screen::IMUStatus) drawIMUStatus();
         }
-        if (currentScreen == Screen::Menu) {
+    }
+
+    if (M5Cardputer.Keyboard.isChange() &&
+        M5Cardputer.Keyboard.isPressed()) {
+        auto status = M5Cardputer.Keyboard.keysState();
+
+        if (M5Cardputer.Keyboard.isKeyPressed('k') ||
+            M5Cardputer.Keyboard.isKeyPressed('K')) {
+            if (recording) stopRecording();
+            else if (currentScreen != Screen::Filename) startRecording();
+            if (currentScreen == Screen::IMUStatus) drawIMUStatus();
+        }
+
+        if (currentScreen == Screen::Filename) {
+            bool changed = false;
+            if (status.del && filenameLength > 0) {
+                filenameInput[--filenameLength] = '\\0';
+                changed = true;
+            }
+            for (auto ch : status.word) {
+                if (filenameLength + 1 < sizeof(filenameInput) &&
+                    ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                     (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
+                    filenameInput[filenameLength++] = ch;
+                    filenameInput[filenameLength] = '\\0';
+                    changed = true;
+                }
+            }
+            if (changed) redrawFilenameInput();
+            if (status.enter) finalizeRecordingName();
+        } else if (currentScreen == Screen::Menu) {
             handleMenuInput();
         } else {
             handleSubscreenInput();

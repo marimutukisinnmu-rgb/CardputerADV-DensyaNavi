@@ -5,6 +5,8 @@
 #include <SD.h>
 #include <TinyGPSPlus.h>
 #include <esp_system.h>
+#include <time.h>
+#include <sys/time.h>
 
 enum class Screen { ImuMain, Filename };
 
@@ -43,6 +45,8 @@ struct IMUSample {
     double gpsSpeedKmph;
     uint32_t gpsSatellites;
     double gpsHdop;
+    char timestampUtc[24];
+    char timeSource[8];
 };
 
 IMUSample imuLogBuffer[IMU_LOG_SAMPLES];
@@ -51,6 +55,10 @@ uint32_t nextImuSampleUs = 0;
 bool sdReady = false;
 bool imuLogReady = false;
 bool recording = false;
+bool screenOn = true;
+uint32_t lastDrawMs = 0;
+constexpr uint32_t SCREEN_REFRESH_MS = 200;
+constexpr uint32_t GPS_TIME_MAX_AGE_MS = 2500;
 
 HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
@@ -58,6 +66,7 @@ TinyGPSPlus gps;
 Screen currentScreen = Screen::ImuMain;
 
 void drawImuMain() {
+    if (!screenOn) return;
     auto& display = M5Cardputer.Display;
     float accX = 0.0f, accY = 0.0f, accZ = 0.0f;
     float gyroX = 0.0f, gyroY = 0.0f, gyroZ = 0.0f;
@@ -81,10 +90,27 @@ void drawImuMain() {
     display.printf("G Z:% .3f\n", gyroZ);
 
     display.setTextSize(1);
-    display.setCursor(8, 110);
-    display.printf("REC: %s  G0/K toggle", recording ? "ON" : "OFF");
-    display.setCursor(8, 123);
-    display.println("G0/K: start-stop");
+    display.setTextSize(1);
+    display.setCursor(8, 92);
+    if (gps.location.isValid()) {
+        display.printf("GPS: FIX  Sats:%lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
+        display.setCursor(8, 103);
+        display.printf("Lat: %.6f", gps.location.lat());
+        display.setCursor(8, 114);
+        display.printf("Lon: %.6f", gps.location.lng());
+    } else {
+        display.println("GPS: NO FIX");
+        display.setCursor(8, 103);
+        display.printf("Satellites: %lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
+    }
+    display.setCursor(8, 126);
+    display.printf("REC:%s G0/K  Q:screen", recording ? "ON" : "OFF");
+    display.setCursor(170, 126);
+    if (gps.date.isValid() && gps.time.isValid() && gps.time.age() <= GPS_TIME_MAX_AGE_MS) {
+        display.printf("%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
+    } else {
+        display.print("SYS TIME");
+    }
 }
 
 void writeImuLogBuffer() {
@@ -96,14 +122,15 @@ void writeImuLogBuffer() {
         return;
     }
 
-    char line[128];
+    char line[224];
     for (size_t i = 0; i < imuLogCount; ++i) {
         const IMUSample& s = imuLogBuffer[i];
         const int length = snprintf(
             line,
             sizeof(line),
-            "%lu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.8f,%.8f,%.2f,%.2f,%lu,%.2f\n",
+            "%lu,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%.8f,%.8f,%.2f,%.2f,%lu,%.2f\n",
             static_cast<unsigned long>(s.timestampMs),
+            s.timestampUtc, s.timeSource,
             s.accX, s.accY, s.accZ,
             s.gyroX, s.gyroY, s.gyroZ,
             s.gpsValid ? 1 : 0,
@@ -145,15 +172,41 @@ void sampleIMUForLog() {
         const uint32_t gpsSatellites = gps.satellites.isValid() ? gps.satellites.value() : 0;
         const double gpsHdop = gps.hdop.isValid() ? gps.hdop.hdop() : NAN;
 
+        char timestampUtc[24] = "";
+        char timeSource[8] = "SYS";
+        const bool gpsTimeFresh = gps.date.isValid() && gps.time.isValid() && gps.time.age() <= GPS_TIME_MAX_AGE_MS;
+        if (gpsTimeFresh) {
+            struct tm tmUtc = {};
+            tmUtc.tm_year = gps.date.year() - 1900;
+            tmUtc.tm_mon = gps.date.month() - 1;
+            tmUtc.tm_mday = gps.date.day();
+            tmUtc.tm_hour = gps.time.hour();
+            tmUtc.tm_min = gps.time.minute();
+            tmUtc.tm_sec = gps.time.second();
+            const time_t epoch = timegm(&tmUtc);
+            struct timeval tv = { epoch, 0 };
+            settimeofday(&tv, nullptr);
+            snprintf(timestampUtc, sizeof(timestampUtc), "%04d-%02d-%02dT%02d:%02d:%02dZ", gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
+            strlcpy(timeSource, "GPS", sizeof(timeSource));
+        } else {
+            const time_t nowEpoch = time(nullptr);
+            if (nowEpoch >= 1577836800) {
+                struct tm tmUtc = {};
+                gmtime_r(&nowEpoch, &tmUtc);
+                strftime(timestampUtc, sizeof(timestampUtc), "%Y-%m-%dT%H:%M:%SZ", &tmUtc);
+                strlcpy(timeSource, "SYS", sizeof(timeSource));
+            } else {
+                snprintf(timestampUtc, sizeof(timestampUtc), "UPTIME+%lu", static_cast<unsigned long>(millis() / 1000U));
+                strlcpy(timeSource, "UPTIME", sizeof(timeSource));
+            }
+        }
         imuLogBuffer[imuLogCount++] = {
-            millis(),
-            accX, accY, accZ,
-            gyroX, gyroY, gyroZ,
-            gpsValid,
-            gpsLat, gpsLon,
-            gpsAltitudeM, gpsSpeedKmph,
-            gpsSatellites, gpsHdop
+            millis(), accX, accY, accZ, gyroX, gyroY, gyroZ, gpsValid,
+            gpsLat, gpsLon, gpsAltitudeM, gpsSpeedKmph, gpsSatellites, gpsHdop,
+            "", ""
         };
+        strlcpy(imuLogBuffer[imuLogCount - 1].timestampUtc, timestampUtc, sizeof(imuLogBuffer[imuLogCount - 1].timestampUtc));
+        strlcpy(imuLogBuffer[imuLogCount - 1].timeSource, timeSource, sizeof(imuLogBuffer[imuLogCount - 1].timeSource));
     }
 
     if (imuLogCount >= IMU_LOG_SAMPLES) {
@@ -186,7 +239,7 @@ bool startRecording() {
 
     File file = SD.open(imuLogPath, FILE_WRITE);
     if (!file) return false;
-    file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
+    file.println("timestamp_ms,time_utc,time_source,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
     file.close();
 
     imuLogCount = 0;
@@ -197,6 +250,7 @@ bool startRecording() {
 }
 
 void showFilenameInput() {
+    if (!screenOn) { currentScreen = Screen::Filename; return; }
     filenameLength = 0;
     filenameInput[0] = '\0';
     currentScreen = Screen::Filename;
@@ -220,6 +274,7 @@ void showFilenameInput() {
 }
 
 void redrawFilenameInput() {
+    if (!screenOn) return;
     auto& display = M5Cardputer.Display;
     display.fillRect(0, 54, display.width(), 24, BLACK);
     display.setCursor(8, 58);
@@ -270,9 +325,10 @@ void stopRecording() {
 
 void updateIMU() {
     sampleIMUForLog();
-
-    if (currentScreen == Screen::ImuMain) {
-        drawImuMain();
+    const uint32_t now = millis();
+    if (screenOn && now - lastDrawMs >= SCREEN_REFRESH_MS) {
+        lastDrawMs = now;
+        if (currentScreen == Screen::ImuMain) drawImuMain();
     }
 }
 
@@ -302,6 +358,17 @@ void loop() {
     updateGPS();
     updateIMU();
 
+    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed() &&
+        (M5Cardputer.Keyboard.isKeyPressed('q') || M5Cardputer.Keyboard.isKeyPressed('Q'))) {
+        screenOn = !screenOn;
+        if (screenOn) {
+            if (currentScreen == Screen::Filename) showFilenameInput();
+            else drawImuMain();
+        } else {
+            M5Cardputer.Display.fillScreen(BLACK);
+        }
+    }
+
     // BtnG0 is active-low. Trigger only on a debounced press edge.
     const bool g0State = digitalRead(BTN_G0_PIN);
     const uint32_t nowMs = millis();
@@ -319,6 +386,7 @@ void loop() {
         M5Cardputer.Keyboard.isPressed()) {
         auto status = M5Cardputer.Keyboard.keysState();
 
+        const bool screenToggleKey = M5Cardputer.Keyboard.isKeyPressed('q') || M5Cardputer.Keyboard.isKeyPressed('Q');
         const bool recordingToggleKey =
             M5Cardputer.Keyboard.isKeyPressed('k') ||
             M5Cardputer.Keyboard.isKeyPressed('K');
@@ -329,8 +397,8 @@ void loop() {
         }
 
         // Do not treat the K key that stopped recording as filename input.
-        if (recordingToggleKey) {
-            // The toggle action is complete for this keyboard event.
+        if (recordingToggleKey || screenToggleKey) {
+            // Toggle keys are handled separately; do not add them to the filename.
         } else if (currentScreen == Screen::Filename) {
             bool changed = false;
             if (status.del && filenameLength > 0) {

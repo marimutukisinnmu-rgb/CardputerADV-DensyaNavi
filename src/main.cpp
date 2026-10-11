@@ -43,10 +43,11 @@ constexpr int SD_MOSI_PIN = 14;
 constexpr int SD_MISO_PIN = 39;
 constexpr uint32_t SD_SPI_HZ = 25000000U;
 
-constexpr uint32_t IMU_LOG_HZ = 150U;
+constexpr uint32_t IMU_LOG_HZ = 40U;
 constexpr uint32_t IMU_LOG_INTERVAL_US = 1000000UL / IMU_LOG_HZ;
-constexpr size_t IMU_LOG_SAMPLES = 150;
-char imuLogPath[32] = "/imu-0.csv";
+constexpr size_t IMU_LOG_SAMPLES = 40;
+char imuLogPath[32] = "/imu-00000.csv";
+uint32_t nextLogNumber = 1;
 
 struct IMUSample {
     uint32_t timestampMs;
@@ -70,6 +71,7 @@ size_t imuLogCount = 0;
 uint32_t nextImuSampleUs = 0;
 bool sdReady = false;
 bool imuLogReady = false;
+bool recording = false;
 
 HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
@@ -185,13 +187,15 @@ void drawIMUStatus() {
     display.printf("G Z:% .3f\n", gyroZ);
 
     display.setTextSize(1);
-    display.setCursor(8, 120);
+    display.setCursor(8, 110);
+    display.printf("REC: %s  K: start/stop", recording ? "ON" : "OFF");
+    display.setCursor(8, 123);
     display.print("Back: ");
     display.println(static_cast<char>(96));
 }
 
 void writeImuLogBuffer() {
-    if (!sdReady || imuLogCount == 0) return;
+    if (!sdReady || !recording || imuLogCount == 0) return;
 
     File file = SD.open(imuLogPath, FILE_APPEND);
     if (!file) {
@@ -227,7 +231,7 @@ void writeImuLogBuffer() {
 }
 
 void sampleIMUForLog() {
-    if (!sdReady) return;
+    if (!sdReady || !recording || !imuLogReady) return;
 
     const uint32_t nowUs = micros();
     if (static_cast<int32_t>(nowUs - nextImuSampleUs) < 0) return;
@@ -267,32 +271,63 @@ void sampleIMUForLog() {
 void setupIMULogging() {
     SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
     sdReady = SD.begin(SD_CS_PIN, SPI, SD_SPI_HZ);
-
     if (!sdReady) {
         imuLogReady = false;
         return;
     }
 
-    // 毎回の起動で新しいランダム番号のログファイルを作る。
-    // 万一同名が存在した場合は別の番号を引き直す。
-    uint32_t randomNumber = 0;
-    do {
-        randomNumber = esp_random();
-        snprintf(imuLogPath, sizeof(imuLogPath), "/imu-%lu.csv",
-                 static_cast<unsigned long>(randomNumber));
-    } while (SD.exists(imuLogPath));
-
-    File file = SD.open(imuLogPath, FILE_WRITE);
-    if (file) {
-        file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
-        file.close();
-        imuLogReady = true;
+    // 前回の連番を読み、次の記録に使う番号を決める。
+    File counterFile = SD.open("/imu_counter.txt", FILE_READ);
+    if (counterFile) {
+        String value = counterFile.readStringUntil('\n');
+        nextLogNumber = static_cast<uint32_t>(value.toInt()) + 1U;
+        counterFile.close();
+        if (nextLogNumber == 0) nextLogNumber = 1;
     } else {
-        imuLogReady = false;
-        return;
+        nextLogNumber = 1;
     }
 
+    // 記録ファイルはKキーで開始した時点で作成する。
+    imuLogReady = true;
+}
+
+bool startRecording() {
+    if (!sdReady || !imuLogReady || recording) return false;
+
+    // 既存ファイルがある場合も上書きせず、空いている連番を探す。
+    while (nextLogNumber != 0) {
+        snprintf(imuLogPath, sizeof(imuLogPath), "/imu-%05lu.csv",
+                 static_cast<unsigned long>(nextLogNumber));
+        if (!SD.exists(imuLogPath)) break;
+        ++nextLogNumber;
+    }
+    if (nextLogNumber == 0) return false;
+
+    SD.remove("/imu_counter.txt");
+    File counterOut = SD.open("/imu_counter.txt", FILE_WRITE);
+    if (counterOut) {
+        counterOut.println(nextLogNumber);
+        counterOut.close();
+    }
+
+    File file = SD.open(imuLogPath, FILE_WRITE);
+    if (!file) return false;
+    file.println("timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,gps_valid,gps_lat,gps_lon,gps_altitude_m,gps_speed_kmph,gps_satellites,gps_hdop");
+    file.close();
+
+    ++nextLogNumber;
+    imuLogCount = 0;
+    recording = true;
     nextImuSampleUs = micros();
+    Serial.printf("[REC] Started: %s at %u Hz\\n", imuLogPath, IMU_LOG_HZ);
+    return true;
+}
+
+void stopRecording() {
+    if (!recording) return;
+    writeImuLogBuffer();
+    recording = false;
+    Serial.printf("[REC] Stopped: %s\\n", imuLogPath);
 }
 
 void updateIMU() {
@@ -443,6 +478,11 @@ void loop() {
 
     if (M5Cardputer.Keyboard.isChange() &&
         M5Cardputer.Keyboard.isPressed()) {
+        if (M5Cardputer.Keyboard.isKeyPressed('k') || M5Cardputer.Keyboard.isKeyPressed('K')) {
+            if (recording) stopRecording();
+            else startRecording();
+            if (currentScreen == Screen::IMUStatus) drawIMUStatus();
+        }
         if (currentScreen == Screen::Menu) {
             handleMenuInput();
         } else {

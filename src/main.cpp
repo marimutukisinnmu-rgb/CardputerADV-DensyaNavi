@@ -408,27 +408,64 @@ void loop() {
         }
     }
 
-    if (M5Cardputer.Keyboard.isChange() &&
-        M5Cardputer.Keyboard.isPressed()) {
+    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
         auto status = M5Cardputer.Keyboard.keysState();
 
-        const bool screenToggleKey = M5Cardputer.Keyboard.isKeyPressed('q') || M5Cardputer.Keyboard.isKeyPressed('Q');
-        const bool recordingToggleKey =
-            M5Cardputer.Keyboard.isKeyPressed('k') ||
-            M5Cardputer.Keyboard.isKeyPressed('K');
+        // Use the reported character data for letter keys instead of relying
+        // only on isKeyPressed(), which can miss key events on some versions.
+        bool recordingToggleKey = false;
+        bool screenToggleKey = false;
+        for (auto ch : status.word) {
+            if (ch == 'k' || ch == 'K') recordingToggleKey = true;
+            if (ch == 'q' || ch == 'Q') screenToggleKey = true;
+        }
+
+        if (screenToggleKey) {
+            screenOn = !screenOn;
+            if (screenOn) {
+                if (currentScreen == Screen::Filename) {
+                    // Redraw without clearing the typed suffix.
+                    auto& display = M5Cardputer.Display;
+                    display.fillScreen(BLACK);
+                    display.setTextColor(WHITE, BLACK);
+                    display.setTextSize(2);
+                    display.setCursor(8, 8);
+                    display.println("Save recording");
+                    display.setTextSize(1);
+                    display.setCursor(8, 38);
+                    display.println("Enter name for imu-XXXX.csv");
+                    display.setCursor(8, 58);
+                    display.print("imu-");
+                    display.print(filenameInput);
+                    display.print(".csv");
+                    display.setCursor(8, 92);
+                    display.println("Type name; DEL to erase");
+                    display.setCursor(8, 108);
+                    display.println("Enter: save");
+                } else {
+                    drawImuMain();
+                }
+            } else {
+                M5Cardputer.Display.fillScreen(BLACK);
+            }
+        }
+
         if (recordingToggleKey) {
             if (recording) stopRecording();
-            else if (currentScreen != Screen::Filename) startRecording();
+            else if (currentScreen != Screen::Filename) {
+                if (!startRecording()) {
+                    Serial.printf("[REC] Start failed: sdReady=%d imuLogReady=%d recording=%d\\n",
+                                  sdReady, imuLogReady, recording);
+                }
+            }
             if (currentScreen == Screen::ImuMain) drawImuMain();
         }
 
-        // Do not treat the K key that stopped recording as filename input.
-        if (recordingToggleKey || screenToggleKey) {
-            // Toggle keys are handled separately; do not add them to the filename.
-        } else if (currentScreen == Screen::Filename) {
+        // Toggle keys must not be appended to the filename.
+        if (!recordingToggleKey && !screenToggleKey && currentScreen == Screen::Filename) {
             bool changed = false;
             if (status.del && filenameLength > 0) {
-                filenameInput[--filenameLength] = '\0';
+                filenameInput[--filenameLength] = '\\0';
                 changed = true;
             }
             for (auto ch : status.word) {
@@ -436,14 +473,12 @@ void loop() {
                     ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                      (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
                     filenameInput[filenameLength++] = ch;
-                    filenameInput[filenameLength] = '\0';
+                    filenameInput[filenameLength] = '\\0';
                     changed = true;
                 }
             }
             if (changed) redrawFilenameInput();
             if (status.enter) finalizeRecordingName();
-        } else if (currentScreen == Screen::ImuMain) {
-            // ImuMain is the only main screen. K handles recording; no menu.
         }
     }
 

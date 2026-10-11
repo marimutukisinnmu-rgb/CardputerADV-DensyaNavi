@@ -22,7 +22,8 @@ constexpr uint32_t SD_SPI_HZ = 25000000U;
 
 constexpr uint32_t IMU_LOG_HZ = 40U;
 constexpr uint32_t IMU_LOG_INTERVAL_US = 1000000UL / IMU_LOG_HZ;
-constexpr size_t IMU_LOG_SAMPLES = 40;
+// 200 samples = 5 seconds of data at 40 Hz; fewer SD writes reduce sampling stalls.
+constexpr size_t IMU_LOG_SAMPLES = 200;
 char imuLogPath[64] = "/imu-pending.csv";
 char filenameInput[48] = "";
 size_t filenameLength = 0;
@@ -162,7 +163,11 @@ void sampleIMUForLog() {
     const uint32_t nowUs = micros();
     if (static_cast<int32_t>(nowUs - nextImuSampleUs) < 0) return;
 
+    // Keep the 25 ms cadence without burst-sampling to catch up after a slow operation.
     nextImuSampleUs += IMU_LOG_INTERVAL_US;
+    if (static_cast<int32_t>(nowUs - nextImuSampleUs) >= 0) {
+        nextImuSampleUs = nowUs + IMU_LOG_INTERVAL_US;
+    }
 
     float accX = 0.0f, accY = 0.0f, accZ = 0.0f;
     float gyroX = 0.0f, gyroY = 0.0f, gyroZ = 0.0f;

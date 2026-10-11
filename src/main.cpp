@@ -319,7 +319,7 @@ bool startRecording() {
     imuLogCount = 0;
     recording = true;
     nextImuSampleUs = micros();
-    Serial.printf("[REC] Started: %s at %u Hz\\n", imuLogPath, IMU_LOG_HZ);
+    Serial.printf("[REC] Started: %s at %u Hz\n", imuLogPath, IMU_LOG_HZ);
     return true;
 }
 

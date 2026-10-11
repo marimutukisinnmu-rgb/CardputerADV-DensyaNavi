@@ -189,7 +189,7 @@ void sampleIMUForLog() {
             tmUtc.tm_hour = gps.time.hour();
             tmUtc.tm_min = gps.time.minute();
             tmUtc.tm_sec = gps.time.second();
-            const time_t epoch = timegm(&tmUtc);
+            const time_t epoch = mktime(&tmUtc); // ESP32 Arduino toolchain compatibility
             static time_t lastGpsClockEpoch = 0;
             if (epoch > 0 && epoch != lastGpsClockEpoch) {
                 struct timeval tv = { epoch, 0 };
@@ -210,13 +210,23 @@ void sampleIMUForLog() {
                 strlcpy(timeSource, "UPTIME", sizeof(timeSource));
             }
         }
-        imuLogBuffer[imuLogCount++] = {
-            millis(), accX, accY, accZ, gyroX, gyroY, gyroZ, gpsValid,
-            gpsLat, gpsLon, gpsAltitudeM, gpsSpeedKmph, gpsSatellites, gpsHdop,
-            "", ""
-        };
-        strlcpy(imuLogBuffer[imuLogCount - 1].timestampUtc, timestampUtc, sizeof(imuLogBuffer[imuLogCount - 1].timestampUtc));
-        strlcpy(imuLogBuffer[imuLogCount - 1].timeSource, timeSource, sizeof(imuLogBuffer[imuLogCount - 1].timeSource));
+        IMUSample& sample = imuLogBuffer[imuLogCount++];
+        sample.timestampMs = millis();
+        sample.accX = accX;
+        sample.accY = accY;
+        sample.accZ = accZ;
+        sample.gyroX = gyroX;
+        sample.gyroY = gyroY;
+        sample.gyroZ = gyroZ;
+        sample.gpsValid = gpsValid;
+        sample.gpsLat = gpsLat;
+        sample.gpsLon = gpsLon;
+        sample.gpsAltitudeM = gpsAltitudeM;
+        sample.gpsSpeedKmph = gpsSpeedKmph;
+        sample.gpsSatellites = gpsSatellites;
+        sample.gpsHdop = gpsHdop;
+        strlcpy(sample.timestampUtc, timestampUtc, sizeof(sample.timestampUtc));
+        strlcpy(sample.timeSource, timeSource, sizeof(sample.timeSource));
     }
 
     if (imuLogCount >= IMU_LOG_SAMPLES) {

@@ -553,14 +553,19 @@ void loop() {
         M5Cardputer.Keyboard.isPressed()) {
         auto status = M5Cardputer.Keyboard.keysState();
 
-        if (M5Cardputer.Keyboard.isKeyPressed('k') ||
-            M5Cardputer.Keyboard.isKeyPressed('K')) {
+        const bool recordingToggleKey =
+            M5Cardputer.Keyboard.isKeyPressed('k') ||
+            M5Cardputer.Keyboard.isKeyPressed('K');
+        if (recordingToggleKey) {
             if (recording) stopRecording();
             else if (currentScreen != Screen::Filename) startRecording();
             if (currentScreen == Screen::IMUStatus) drawIMUStatus();
         }
 
-        if (currentScreen == Screen::Filename) {
+        // Do not treat the K key that stopped recording as filename input.
+        if (recordingToggleKey) {
+            // The toggle action is complete for this keyboard event.
+        } else if (currentScreen == Screen::Filename) {
             bool changed = false;
             if (status.del && filenameLength > 0) {
                 filenameInput[--filenameLength] = '\\0';

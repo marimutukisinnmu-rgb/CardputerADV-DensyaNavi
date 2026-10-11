@@ -352,6 +352,8 @@ void redrawFilenameInput() {
     display.print(".csv");
 }
 
+void returnToMenu();
+
 void finalizeRecordingName() {
     if (filenameLength == 0) return;
     // Permit letters, digits, dash and underscore only; this prevents paths.

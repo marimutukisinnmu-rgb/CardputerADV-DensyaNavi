@@ -272,7 +272,7 @@ void updateIMU() {
     sampleIMUForLog();
 
     if (currentScreen == Screen::ImuMain) {
-        drawIMUStatus();
+        drawImuMain();
     }
 }
 
@@ -301,7 +301,6 @@ void loop() {
     M5Cardputer.update();
     updateGPS();
     updateIMU();
-    updateEnvironment();
 
     // BtnG0 is active-low. Trigger only on a debounced press edge.
     const bool g0State = digitalRead(BTN_G0_PIN);
@@ -326,7 +325,7 @@ void loop() {
         if (recordingToggleKey) {
             if (recording) stopRecording();
             else if (currentScreen != Screen::Filename) startRecording();
-            if (currentScreen == Screen::IMUStatus) drawIMUStatus();
+            if (currentScreen == Screen::ImuMain) drawImuMain();
         }
 
         // Do not treat the K key that stopped recording as filename input.
@@ -350,9 +349,7 @@ void loop() {
             if (changed) redrawFilenameInput();
             if (status.enter) finalizeRecordingName();
         } else if (currentScreen == Screen::ImuMain) {
-            handleMenuInput();
-        } else {
-            handleSubscreenInput();
+            // ImuMain is the only main screen. K handles recording; no menu.
         }
     }
 

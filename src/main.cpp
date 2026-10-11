@@ -80,37 +80,43 @@ void drawImuMain() {
     display.setCursor(8, 1);
     display.println("ImuMain | RAW DATA");
 
-    display.setTextSize(2);
-    display.setCursor(8, 14);
-    display.printf("A X:% .3f\n", accX);
-    display.printf("A Y:% .3f\n", accY);
-    display.printf("A Z:% .3f\n", accZ);
-    display.printf("G X:% .3f\n", gyroX);
-    display.printf("G Y:% .3f\n", gyroY);
-    display.printf("G Z:% .3f\n", gyroZ);
+    display.setTextSize(1);
+    display.setCursor(8, 16);
+    display.printf("ACC  X:% .3f Y:% .3f Z:% .3f", accX, accY, accZ);
+    display.setCursor(8, 28);
+    display.printf("GYRO X:% .3f Y:% .3f Z:% .3f", gyroX, gyroY, gyroZ);
 
-    display.setTextSize(1);
-    display.setTextSize(1);
-    display.setCursor(8, 92);
+    display.setCursor(8, 43);
     if (gps.location.isValid()) {
-        display.printf("GPS: FIX  Sats:%lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
-        display.setCursor(8, 103);
-        display.printf("Lat: %.6f", gps.location.lat());
-        display.setCursor(8, 114);
-        display.printf("Lon: %.6f", gps.location.lng());
+        display.printf("GPS: FIX  SAT:%lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
+        display.setCursor(8, 55);
+        display.printf("LAT: %.6f", gps.location.lat());
+        display.setCursor(8, 67);
+        display.printf("LON: %.6f", gps.location.lng());
     } else {
         display.println("GPS: NO FIX");
-        display.setCursor(8, 103);
-        display.printf("Satellites: %lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
+        display.setCursor(8, 55);
+        display.printf("SATELLITES: %lu", static_cast<unsigned long>(gps.satellites.isValid() ? gps.satellites.value() : 0));
+        display.setCursor(8, 67);
+        display.println("LAT/LON: --");
     }
-    display.setCursor(8, 126);
-    display.printf("REC:%s G0/K  Q:screen", recording ? "ON" : "OFF");
-    display.setCursor(170, 126);
+    display.setCursor(8, 81);
     if (gps.date.isValid() && gps.time.isValid() && gps.time.age() <= GPS_TIME_MAX_AGE_MS) {
-        display.printf("%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
+        display.printf("GPS UTC: %04d-%02d-%02d %02d:%02d:%02d", gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
     } else {
-        display.print("SYS TIME");
+        const time_t nowEpoch = time(nullptr);
+        if (nowEpoch >= 1577836800) {
+            struct tm tmUtc = {};
+            gmtime_r(&nowEpoch, &tmUtc);
+            display.printf("SYS UTC: %04d-%02d-%02d %02d:%02d:%02d", tmUtc.tm_year + 1900, tmUtc.tm_mon + 1, tmUtc.tm_mday, tmUtc.tm_hour, tmUtc.tm_min, tmUtc.tm_sec);
+        } else {
+            display.printf("SYS: not set (UP %lus)", static_cast<unsigned long>(millis() / 1000U));
+        }
     }
+    display.setCursor(8, 108);
+    display.printf("REC:%s  G0/K:REC  Q:SCREEN", recording ? "ON" : "OFF");
+    display.setCursor(8, 122);
+    display.printf("GPS time age: %lu ms", static_cast<unsigned long>(gps.time.age()));
 }
 
 void writeImuLogBuffer() {
@@ -184,8 +190,12 @@ void sampleIMUForLog() {
             tmUtc.tm_min = gps.time.minute();
             tmUtc.tm_sec = gps.time.second();
             const time_t epoch = timegm(&tmUtc);
-            struct timeval tv = { epoch, 0 };
-            settimeofday(&tv, nullptr);
+            static time_t lastGpsClockEpoch = 0;
+            if (epoch > 0 && epoch != lastGpsClockEpoch) {
+                struct timeval tv = { epoch, 0 };
+                settimeofday(&tv, nullptr);
+                lastGpsClockEpoch = epoch;
+            }
             snprintf(timestampUtc, sizeof(timestampUtc), "%04d-%02d-%02dT%02d:%02d:%02dZ", gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
             strlcpy(timeSource, "GPS", sizeof(timeSource));
         } else {

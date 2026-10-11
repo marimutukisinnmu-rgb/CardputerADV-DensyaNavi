@@ -321,7 +321,7 @@ bool startRecording() {
 
 void showFilenameInput() {
     filenameLength = 0;
-    filenameInput[0] = '\\0';
+    filenameInput[0] = '\0';
     currentScreen = Screen::Filename;
     auto& display = M5Cardputer.Display;
     display.fillScreen(BLACK);
@@ -570,7 +570,7 @@ void loop() {
         } else if (currentScreen == Screen::Filename) {
             bool changed = false;
             if (status.del && filenameLength > 0) {
-                filenameInput[--filenameLength] = '\\0';
+                filenameInput[--filenameLength] = '\0';
                 changed = true;
             }
             for (auto ch : status.word) {
@@ -578,7 +578,7 @@ void loop() {
                     ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                      (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
                     filenameInput[filenameLength++] = ch;
-                    filenameInput[filenameLength] = '\\0';
+                    filenameInput[filenameLength] = '\0';
                     changed = true;
                 }
             }

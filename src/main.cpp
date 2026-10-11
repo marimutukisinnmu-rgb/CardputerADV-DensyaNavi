@@ -251,9 +251,10 @@ bool startRecording() {
     if (!sdReady || !imuLogReady || recording) return false;
 
     strlcpy(imuLogPath, "/imu-pending.csv", sizeof(imuLogPath));
-    // 前回の仮ファイルが残っていても、意図せず上書きしない。
-    if (SD.exists(imuLogPath)) {
-        Serial.println("[REC] Pending file already exists; rename or remove it first.");
+    // 仮ファイルは毎回上書きする。FILE_WRITE は追記動作になる場合があるため、
+    // 既存ファイルを先に削除してから新規作成する。
+    if (SD.exists(imuLogPath) && !SD.remove(imuLogPath)) {
+        Serial.println("[REC] Could not remove old pending file.");
         return false;
     }
 

@@ -271,7 +271,7 @@ bool startRecording() {
     imuLogCount = 0;
     recording = true;
     nextImuSampleUs = micros();
-    Serial.printf("[REC] Started: %s at %u Hz\\n", imuLogPath, IMU_LOG_HZ);
+    Serial.printf("[REC] Started: %s at %u Hz\n", imuLogPath, IMU_LOG_HZ);
     return true;
 }
 
@@ -336,7 +336,7 @@ void finalizeRecordingName() {
         return;
     }
     strlcpy(imuLogPath, finalPath, sizeof(imuLogPath));
-    Serial.printf("[REC] Saved as: %s\\n", imuLogPath);
+    Serial.printf("[REC] Saved as: %s\n", imuLogPath);
     currentScreen = Screen::ImuMain;
     drawImuMain();
 }
@@ -345,7 +345,7 @@ void stopRecording() {
     if (!recording) return;
     writeImuLogBuffer();
     recording = false;
-    Serial.printf("[REC] Stopped: %s\\n", imuLogPath);
+    Serial.printf("[REC] Stopped: %s\n", imuLogPath);
     showFilenameInput();
 }
 
@@ -443,7 +443,7 @@ void loop() {
             if (recording) stopRecording();
             else if (currentScreen != Screen::Filename) {
                 if (!startRecording()) {
-                    Serial.printf("[REC] Start failed: sdReady=%d imuLogReady=%d recording=%d\\n",
+                    Serial.printf("[REC] Start failed: sdReady=%d imuLogReady=%d recording=%d\n",
                                   sdReady, imuLogReady, recording);
                 }
             }
@@ -454,7 +454,7 @@ void loop() {
         if (!recordingToggleKey && !screenToggleKey && currentScreen == Screen::Filename) {
             bool changed = false;
             if (status.del && filenameLength > 0) {
-                filenameInput[--filenameLength] = '\\0';
+                filenameInput[--filenameLength] = '\0';
                 changed = true;
             }
             for (auto ch : status.word) {
@@ -462,7 +462,7 @@ void loop() {
                     ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                      (ch >= '0' && ch <= '9') || ch == '-' || ch == '_')) {
                     filenameInput[filenameLength++] = ch;
-                    filenameInput[filenameLength] = '\\0';
+                    filenameInput[filenameLength] = '\0';
                     changed = true;
                 }
             }

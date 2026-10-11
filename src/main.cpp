@@ -384,17 +384,6 @@ void loop() {
     updateGPS();
     updateIMU();
 
-    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed() &&
-        (M5Cardputer.Keyboard.isKeyPressed('q') || M5Cardputer.Keyboard.isKeyPressed('Q'))) {
-        screenOn = !screenOn;
-        if (screenOn) {
-            if (currentScreen == Screen::Filename) showFilenameInput();
-            else drawImuMain();
-        } else {
-            M5Cardputer.Display.fillScreen(BLACK);
-        }
-    }
-
     // BtnG0 is active-low. Trigger only on a debounced press edge.
     const bool g0State = digitalRead(BTN_G0_PIN);
     const uint32_t nowMs = millis();

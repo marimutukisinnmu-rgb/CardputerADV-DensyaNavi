@@ -1,5 +1,7 @@
 # CardputerADV-DensyaNavi — PC tools
 
+[日本語](README.md) | [English](README_en.md)
+
 PC側で駅データの取得などを行うためのツール置き場です。
 
 ## 駅データのダウンロード

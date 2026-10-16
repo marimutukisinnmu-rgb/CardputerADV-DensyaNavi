@@ -5,34 +5,46 @@ PC側で駅データの取得などを行うためのツール置き場です。
 ## 駅データのダウンロード
 
 ### 必要なもの
-- Python(Python 3.10 以降を推奨)
+- Python（Python 3.10 以降を推奨）
 - インターネット接続
 
 追加ライブラリのインストールは不要です。Python標準ライブラリだけで動作します。
 
 ### 実行方法
 
-このブランチをPCに取得し、リポジトリ直下で次を実行します。
+1. GitHubの [`pc` ブランチ](https://github.com/marimutukisinnmu-rgb/CardputerADV-DensyaNavi/tree/pc) からZIPをダウンロードします。
+2. ZIPを展開します。
+3. `download_data.py` があるフォルダを作業フォルダにして、以下のコマンドを実行します。
 
-Windows:
-今の作業フォルダがダウンロードした場所(download_data.py があるフォルダ)で
+**Windows**
+
+Python Launcher（`py` コマンド）が使える場合：
+
 ```cmd
 py download_data.py
 ```
-または今の作業フォルダがダウンロードした場所かつpythonをPATH(環境変数)に通した状態で
+
+または、PythonにPATH（環境変数）が通っている場合：
+
 ```cmd
 python download_data.py
 ```
-`※powershellでも可`
-macOS / Linux:
-同じくPATH(環境変数)を通していて作業フォルダがダウンロードした場所(download_data.py があるフォルダ)で
+
+※ コマンドプロンプトとPowerShellのどちらでも実行できます。
+
+**macOS / Linux**
+
+Python 3にPATHが通っている状態で、次を実行します。
+
 ```sh
 python3 download_data.py
 ```
 
+### ダウンロード後の構成
+
 成功すると、スクリプトと同じ階層に `station_data/` が作成され、次の内容が保存されます。
 
-```tree
+```text
 station_data/
 ├── out/
 ├── README.md
@@ -49,4 +61,5 @@ station_data/
 データの加工、変換、microSDへの書き込みはまだ行いません。
 
 ### ライセンスと注意
+
 取得元データのライセンス・出典・利用条件は、保存された `station_data/LICENSE.md` と `station_data/README.md` を確認してください。取得元リポジトリには、データの正確性や最新性を保証しない旨の注意があります。

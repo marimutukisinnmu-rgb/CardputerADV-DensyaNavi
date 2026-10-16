@@ -15,18 +15,24 @@ PC側で駅データの取得などを行うためのツール置き場です。
 このブランチをPCに取得し、リポジトリ直下で次を実行します。
 
 Windows:
-```powershell
+pythonをPATH(環境変数)に通した状態かつ今の作業フォルダがダウンロードした場所で
+```cmd
 py download_data.py
 ```
-
+または
+```cmd
+python download_data.py
+```
+`※powershellでも可`
 macOS / Linux:
+同じくPATH(環境変数)を通している状態で
 ```sh
 python3 download_data.py
 ```
 
 成功すると、スクリプトと同じ階層に `station_data/` が作成され、次の内容が保存されます。
 
-```text
+```tree
 station_data/
 ├── out/
 ├── README.md
